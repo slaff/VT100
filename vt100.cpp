@@ -387,7 +387,6 @@ STATE(_st_esc_sq_bracket, term, ev, arg)
 				break;
 			}
 			case 'J': { // clear screen from cursor up or down
-				uint16_t y = VT100_CURSOR_Y(term);
 				if(term->narg == 0 || (term->narg == 1 && term->args[0] == 0)) {
 					// clear down to the bottom of screen (including cursor)
 					_vt100_clearLines(term, term->cursor_y, term->row_count);
