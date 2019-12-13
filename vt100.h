@@ -17,10 +17,9 @@
 	Copyright: Martin K. Schröder (info@fortmax.se) 2014
 */
 
-#ifndef __VT100_H
-#define __VT100_H
+#pragma once
 
-#include "c_types.h"
+#include <stdint.h>
 
 //#define VT100_SCREEN_WIDTH term->display->getWidth()
 //#define VT100_SCREEN_HEIGHT term->display->getHeight()
@@ -62,5 +61,3 @@ void vt100_init(DisplayDevice* display, VT100Callbacks* callbacks);
 void vt100_putc(uint8_t ch);
 void vt100_puts(const char* str);
 size_t vt100_nputs(const char* str, size_t length);
-
-#endif // __VT100_H
