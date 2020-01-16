@@ -19,14 +19,7 @@
 
 #pragma once
 
-#include <stdint.h>
-
-//#define VT100_SCREEN_WIDTH term->display->getWidth()
-//#define VT100_SCREEN_HEIGHT term->display->getHeight()
-//#define VT100_CHAR_WIDTH 9
-//#define VT100_CHAR_HEIGHT 13
-//#define VT100_HEIGHT (VT100_SCREEN_HEIGHT / VT100_CHAR_HEIGHT)
-//#define VT100_WIDTH (VT100_SCREEN_WIDTH / VT100_CHAR_WIDTH)
+#include <cstdint>
 
 class DisplayDevice
 {
@@ -42,8 +35,7 @@ public:
 	virtual void setFrontColor(uint16_t col) = 0;
 	virtual void fillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) = 0;
 
-	virtual void setScrollStart(uint16_t start) = 0;
-	virtual void setScrollMargins(uint16_t top, uint16_t bottom) = 0;
+	virtual void scroll(uint16_t top, uint16_t bottom, int16_t diff) = 0;
 
 	virtual uint16_t getWidth() = 0;
 	virtual uint16_t getHeight() = 0;

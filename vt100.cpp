@@ -17,9 +17,10 @@
 	Copyright: Martin K. Schröder (info@fortmax.se) 2014
 */
 
-#include <ctype.h>
-//#include <math.h>
-#include <stdlib.h>
+#include <cctype>
+#include <cstring>
+#include <cstdlib>
+#include <stringutil.h>
 
 #include "vt100.h"
 
@@ -39,7 +40,7 @@ enum {
 
 #define MAX_COMMAND_ARGS 4
 static struct vt100 {
-	union flags {
+	union Flags {
 		uint8_t val;
 		struct {
 			// 0 = cursor remains on last column when it gets there
@@ -48,7 +49,8 @@ static struct vt100 {
 			uint8_t scroll_mode : 1;
 			uint8_t origin_mode : 1;
 		};
-	} flags;
+	};
+	Flags flags;
 
 	//uint16_t screen_width, screen_height;
 	// cursor position on the screen (0, 0) = top left corner.
@@ -106,8 +108,6 @@ void _vt100_reset()
 	term.flags.origin_mode = 0;
 	term.display->setFrontColor(term.front_color);
 	term.display->setBackColor(term.back_color);
-	term.display->setScrollMargins(0, 0);
-	term.display->setScrollStart(0);
 }
 
 void _vt100_resetScroll()
@@ -115,51 +115,10 @@ void _vt100_resetScroll()
 	term.scroll_start_row = 0;
 	term.scroll_end_row = term.row_count;
 	term.scroll_value = 0;
-	term.display->setScrollMargins(0, 0);
-	term.display->setScrollStart(0);
 }
 
 #define VT100_CURSOR_X(TERM) (TERM->cursor_x * TERM->char_width)
-
-inline uint16_t VT100_CURSOR_Y(struct vt100* t)
-{
-	// if within the top or bottom margin areas then normal addressing
-	if(t->cursor_y < t->scroll_start_row || t->cursor_y >= t->scroll_end_row) {
-		return t->cursor_y * t->char_height;
-	} else {
-		// otherwise we are inside scroll area
-		uint16_t scroll_height = t->scroll_end_row - t->scroll_start_row;
-		uint16_t row = t->cursor_y + t->scroll_value;
-		if(t->cursor_y + t->scroll_value >= t->scroll_end_row)
-			row -= scroll_height;
-		// if scroll_value == 0: y = t->cursor_y;
-		// if scroll_value == 1 && scroll_start_row == 2 && scroll_end_row == 38:
-		// 		y = t->cursor_y + scroll_value;
-		//uint16_t row = (t->cursor_y - t->scroll_start_row) % scroll_height;
-		/*uint16_t skip = t->scroll_value - t->scroll_start_row; 
-		uint16_t row = t->cursor_y + skip;
-		uint16_t scroll_height = t->scroll_end_row - t->scroll_start_row; 
-		//row = (row % scroll_height);// + t->scroll_start_row;*/
-		return row * t->char_height;
-	}
-	/*uint16_t y = 0;
-	if(t->cursor_y >= t->top_margin && t->cursor_y < t->bottom_margin){
-		y = t->cursor_y * term->char_height;
-		if(t->scroll >= (t->top_margin * term->char_height)){
-			y += t->scroll - t->top_margin * term->char_height;
-		}
-	} else if(t->cursor_y < t->top_margin){
-		y = (t->cursor_y * term->char_height);
-	} else if(t->cursor_y >= t->bottom_margin){
-		y = (t->cursor_y * term->char_height);
-		if(t->scroll >= (t->top_margin * term->char_height)){
-			y += t->scroll - t->top_margin * term->char_height;
-		}
-	}
-	//y = ((t->cursor_y - (term.row_count - t->bottom_margin)) * term->char_height);// % term.screen_height;
-	//y = ((t->cursor_y * term->char_height) + t->scroll) % term.screen_height;
-	return y % term.screen_height;*/
-}
+#define VT100_CURSOR_Y(TERM) (TERM->cursor_y * TERM->char_height)
 
 void _vt100_clearLines(struct vt100* t, uint16_t start_line, uint16_t end_line)
 {
@@ -169,16 +128,14 @@ void _vt100_clearLines(struct vt100* t, uint16_t start_line, uint16_t end_line)
 		t->display->fillRect(0, VT100_CURSOR_Y(t), t->screen_width, t->char_height, 0x0000);
 		t->cursor_y = cy;
 	}
-	/*uint16_t start = ((start_line * t->char_height) + t->scroll) % term.screen_height;
-	uint16_t h = (end_line - start_line) * term->char_height;
-	term.display->fillRect(0, start, term.screen_width, h, 0x0000); */
 }
 
 // scrolls the scroll region up (lines > 0) or down (lines < 0)
 void _vt100_scroll(struct vt100* t, int16_t lines)
 {
-	if(!lines)
+	if(lines == 0) {
 		return;
+	}
 
 	// get height of scroll area in rows
 	uint16_t scroll_height = t->scroll_end_row - t->scroll_start_row;
@@ -187,37 +144,15 @@ void _vt100_scroll(struct vt100* t, int16_t lines)
 		_vt100_clearLines(t, t->scroll_start_row, t->scroll_start_row + lines - 1);
 		// update the scroll value (wraps around scroll_height)
 		t->scroll_value = (t->scroll_value + lines) % scroll_height;
-		// scrolling up so clear first line of scroll area
-		//uint16_t y = (t->scroll_start_row + t->scroll_value) * term->char_height;
-		//term.display->fillRect(0, y, term.screen_width, lines * term->char_height, 0x0000);
-	} else if(lines < 0) {
+	} else {
 		_vt100_clearLines(t, t->scroll_end_row - lines, t->scroll_end_row - 1);
 		// make sure that the value wraps down
 		t->scroll_value = (scroll_height + t->scroll_value + lines) % scroll_height;
-		// scrolling down - so clear last line of the scroll area
-		//uint16_t y = (t->scroll_start_row + t->scroll_value) * term->char_height;
-		//term.display->fillRect(0, y, term.screen_width, lines * term->char_height, 0x0000);
 	}
-	uint16_t scroll_start = (t->scroll_start_row + t->scroll_value) * t->char_height;
-	t->display->setScrollStart(scroll_start);
 
-	/*
-	int16_t pixels = lines * term->char_height;
-	uint16_t scroll_min = t->top_margin * term->char_height;
-	uint16_t scroll_max = t->bottom_margin * term->char_height;
-
-	// starting position must be between top and bottom margin
-	// scroll_start == top margin - no scroll at all
-	if(t->scroll >= scroll_min){
-		// clear the top n lines
-		term.display->fillRect(0, t->scroll, term.screen_width, pixels, 0x0000);
-		t->scroll += pixels;
-	} else {
-		term.display->fillRect(0, scroll_min, term.screen_width, pixels, 0x0000);
-		t->scroll = scroll_min + pixels;
-	}
-	t->scroll = t->scroll % term.screen_height;
-	term.display->setScrollStart(t->scroll);*/
+	auto top = (t->scroll_start_row + t->scroll_value) * t->char_height;
+	auto bottom = (t->scroll_end_row + t->scroll_value) * t->char_height;
+	t->display->scroll(top, bottom, lines * t->char_height);
 }
 
 // moves the cursor relative to current cursor position and scrolls the screen
@@ -225,16 +160,16 @@ void _vt100_move(struct vt100* term, int16_t right_left, int16_t bottom_top)
 {
 	// calculate how many lines we need to move down or up if x movement goes outside screen
 	int16_t new_x = right_left + term->cursor_x;
-	if(new_x > term->col_count) {
+	if(new_x >= term->col_count) {
 		if(term->flags.cursor_wrap) {
 			bottom_top += new_x / term->col_count;
-			term->cursor_x = new_x % term->col_count - 1;
+			term->cursor_x = new_x % term->col_count;
 		} else {
 			term->cursor_x = term->col_count;
 		}
 	} else if(new_x < 0) {
-		bottom_top += new_x / term->col_count - 1;
-		term->cursor_x = term->col_count - (abs(new_x) % term->col_count) + 1;
+		bottom_top += new_x / term->col_count;
+		term->cursor_x = term->col_count - (abs(new_x) % term->col_count);
 	} else {
 		term->cursor_x = new_x;
 	}
@@ -279,11 +214,10 @@ void _vt100_drawCursor(struct vt100* t)
 void _vt100_putc(struct vt100* t, uint8_t ch)
 {
 	if(ch < 0x20 || ch > 0x7e) {
-		static const char hex[] = "0123456789abcdef";
 		_vt100_putc(t, '0');
 		_vt100_putc(t, 'x');
-		_vt100_putc(t, hex[((ch & 0xf0) >> 4)]);
-		_vt100_putc(t, hex[(ch & 0x0f)]);
+		_vt100_putc(t, hexchar((ch & 0xf0) >> 4));
+		_vt100_putc(t, hexchar(ch & 0x0f));
 		return;
 	}
 
@@ -508,17 +442,15 @@ STATE(_st_esc_sq_bracket, term, ev, arg)
 			case '@': // Insert Characters
 				term->state = _st_idle;
 				break;
-			case 'r': // Set scroll region (top and bottom margins)
+			case 'r': // Set scroll region (top and bottom margins) e.g. [1;40r
 				// the top value is first row of scroll region
 				// the bottom value is the first row of static region after scroll
 				if(term->narg == 2 && term->args[0] < term->args[1]) {
-					// [1;40r means scroll region between 8 and 312
-					// bottom margin is 320 - (40 - 1) * 8 = 8 pix
 					term->scroll_start_row = term->args[0] - 1;
 					term->scroll_end_row = term->args[1] - 1;
 					uint16_t top_margin = term->scroll_start_row * term->char_height;
 					uint16_t bottom_margin = term->screen_height - (term->scroll_end_row * term->char_height);
-					term->display->setScrollMargins(top_margin, bottom_margin);
+					//term->display->setScrollMargins(top_margin, bottom_margin);
 					//term.display->setScrollStart(0); // reset scroll
 				} else {
 					_vt100_resetScroll();
@@ -696,32 +628,30 @@ STATE(_st_esc_hash, term, ev, arg)
 
 STATE(_st_escape, term, ev, arg)
 {
+	auto clearArgs = [term]() {
+		term->narg = 0;
+		memset(term->args, 0, sizeof(term->args));
+	};
+
 	switch(ev) {
 	case EV_CHAR: {
-#define CLEAR_ARGS                                                                                                     \
-	{                                                                                                                  \
-		term->narg = 0;                                                                                                \
-		for(int c = 0; c < MAX_COMMAND_ARGS; c++)                                                                      \
-			term->args[c] = 0;                                                                                         \
-	}
-
 		switch(arg) {
 		case '[': { // command
 			// prepare command state and switch to it
-			CLEAR_ARGS;
+			clearArgs();
 			term->state = _st_esc_sq_bracket;
 			break;
 		}
 		case '(': /* ESC ( */
-			CLEAR_ARGS;
+			clearArgs();
 			term->state = _st_esc_left_br;
 			break;
 		case ')': /* ESC ) */
-			CLEAR_ARGS;
+			clearArgs();
 			term->state = _st_esc_right_br;
 			break;
 		case '#': // ESC #
-			CLEAR_ARGS;
+			clearArgs();
 			term->state = _st_esc_hash;
 			break;
 		case 'P': //ESC P (DCS, Device Control String)
@@ -788,7 +718,6 @@ STATE(_st_escape, term, ev, arg)
 			break;
 		}
 		}
-#undef CLEAR_ARGS
 		break;
 	}
 	default: {
