@@ -150,8 +150,8 @@ void _vt100_scroll(struct vt100* t, int16_t lines)
 		t->scroll_value = (scroll_height + t->scroll_value + lines) % scroll_height;
 	}
 
-	auto top = (t->scroll_start_row + t->scroll_value) * t->char_height;
-	auto bottom = (t->scroll_end_row + t->scroll_value) * t->char_height;
+	auto top = t->scroll_start_row * t->char_height;
+	auto bottom = t->scroll_end_row * t->char_height;
 	t->display->scroll(top, bottom, lines * t->char_height);
 }
 
