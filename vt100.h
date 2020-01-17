@@ -20,6 +20,7 @@
 #pragma once
 
 #include <cstdint>
+#include <sming_attr.h>
 
 class DisplayDevice
 {
@@ -49,8 +50,122 @@ public:
 	virtual void sendResponse(const char* str) = 0;
 };
 
-void vt100_init(DisplayDevice* display, VT100Callbacks* callbacks);
-void vt100_putc(uint8_t ch, unsigned count = 1);
-void vt100_puts(const char* str);
-size_t vt100_nputs(const char* str, size_t length);
-size_t vt100_printf(const char *fmt, ...);
+// states
+enum { STATE_IDLE, STATE_ESCAPE, STATE_COMMAND };
+
+// events that are passed into states
+enum {
+	EV_CHAR = 1,
+};
+
+#define MAX_COMMAND_ARGS 4
+class Vt100
+{
+public:
+	Vt100(DisplayDevice& display, VT100Callbacks& callbacks) : display(display), callbacks(callbacks)
+	{
+	}
+
+	void reset();
+	void putc(uint8_t ch, unsigned count = 1);
+	void puts(const char* str);
+	size_t nputs(const char* str, size_t length);
+	size_t printf(const char* fmt, ...);
+
+protected:
+#define VT100_STATE_MAP(XX)                                                                                            \
+	XX(idle)                                                                                                           \
+	XX(command_arg)                                                                                                    \
+	XX(esc_sq_bracket)                                                                                                 \
+	XX(esc_question)                                                                                                   \
+	XX(esc_hash)                                                                                                       \
+	XX(esc_left_br)                                                                                                    \
+	XX(esc_right_br)                                                                                                   \
+	XX(escape)
+
+	enum class State {
+#define XX(s) s,
+		VT100_STATE_MAP(XX)
+#undef XX
+	};
+
+	void resetScroll();
+	void clearLines(uint16_t start_line, uint16_t end_line);
+	void move(int16_t right_left, int16_t bottom_top);
+	void drawCursor();
+	void _putc(uint8_t ch);
+
+	void _st_idle(uint8_t ev, uint16_t arg);
+	void _st_command_arg(uint8_t ev, uint16_t arg);
+	void _st_esc_sq_bracket(uint8_t ev, uint16_t arg);
+	void _st_esc_question(uint8_t ev, uint16_t arg);
+	void _st_esc_hash(uint8_t ev, uint16_t arg);
+	void _st_esc_left_br(uint8_t ev, uint16_t arg);
+	void _st_esc_right_br(uint8_t ev, uint16_t arg);
+	void _st_escape(uint8_t ev, uint16_t arg);
+
+	__forceinline void callState(uint8_t ev, uint16_t arg)
+	{
+		(this->*stateTable[unsigned(state)])(ev, arg);
+	}
+
+	__forceinline uint16_t VT100_X(uint16_t x)
+	{
+		return x * char_width;
+	}
+
+	__forceinline uint16_t VT100_Y(uint16_t y)
+	{
+		return y * char_height;
+	}
+
+	__forceinline uint16_t VT100_CURSOR_X()
+	{
+		return VT100_X(cursor_x);
+	}
+
+	__forceinline uint16_t VT100_CURSOR_Y()
+	{
+		return VT100_Y(cursor_y);
+	}
+
+private:
+	using StateMethod = void (Vt100::*)(uint8_t ev, uint16_t arg);
+	static const StateMethod stateTable[];
+
+	union Flags {
+		uint8_t val;
+		struct {
+			// 0 = cursor remains on last column when it gets there
+			// 1 = lines wrap after last column to next line
+			uint8_t cursor_wrap : 1;
+			uint8_t scroll_mode : 1;
+			uint8_t origin_mode : 1;
+		};
+	};
+	Flags flags;
+
+	// cursor position on the screen (0, 0) = top left corner.
+	int16_t cursor_x, cursor_y;
+	int16_t saved_cursor_x, saved_cursor_y; // used for cursor save restore
+	int16_t scroll_start_row, scroll_end_row;
+	// character width and height
+	int8_t char_width, char_height;
+	// Screem size in pixels
+	uint16_t screen_width, screen_height;
+	// Screen size in characters
+	uint16_t row_count, col_count;
+	// colors used for rendering current characters
+	uint16_t back_color, front_color;
+	// command arguments that get parsed as they appear in the terminal
+	uint8_t narg;
+	uint16_t args[MAX_COMMAND_ARGS];
+	// current arg pointer (we use it for parsing)
+	uint8_t carg;
+
+	State state;
+	State ret_state;
+
+	DisplayDevice& display;
+	VT100Callbacks& callbacks;
+};
