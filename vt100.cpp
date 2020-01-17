@@ -22,7 +22,6 @@
 #include <cstdlib>
 #include <stringutil.h>
 #include <m_printf.h>
-#include <debug_progmem.h>
 
 #include "vt100.h"
 
@@ -31,45 +30,45 @@
 #define KEY_BELL 0x07
 
 const Vt100::StateMethod Vt100::stateTable[] = {
-#define XX(s) &Vt100::_st_##s,
+#define XX(s) &Vt100::state_##s,
 	VT100_STATE_MAP(XX)
 #undef XX
 };
 
 void Vt100::reset()
 {
-	char_height = display.getCharHeight();
-	char_width = display.getCharWidth();
-	screen_width = display.getWidth();
-	screen_height = display.getHeight();
-	row_count = screen_height / char_height;
-	col_count = screen_width / char_width;
-	back_color = 0x0000;
-	front_color = 0xffff;
-	cursor_x = cursor_y = saved_cursor_x = saved_cursor_y = 0;
-	narg = 0;
+	charHeight = display.getCharHeight();
+	charWidth = display.getCharWidth();
+	screenWidth = display.getWidth();
+	screenHeight = display.getHeight();
+	rowCount = screenHeight / charHeight;
+	colCount = screenWidth / charWidth;
+	backColor = 0x0000;
+	frontColor = 0xffff;
+	cursorPos = {};
+	savedCursorPos = {};
+	args = {};
 	state = State::idle;
 	ret_state = State::idle;
 	resetScroll();
-	flags.cursor_wrap = 0;
-	flags.origin_mode = 0;
-	display.setFrontColor(front_color);
-	display.setBackColor(back_color);
+	flags.val = 0;
+	display.setFrontColor(frontColor);
+	display.setBackColor(backColor);
 }
 
 void Vt100::resetScroll()
 {
-	scroll_start_row = 0;
-	scroll_end_row = row_count - 1;
+	scrollStartRow = 0;
+	scrollEndRow = rowCount - 1;
 }
 
 void Vt100::clearLines(uint16_t start_line, uint16_t end_line)
 {
 	for(int c = start_line; c <= end_line; c++) {
-		uint16_t cy = cursor_y;
-		cursor_y = c;
-		display.fillRect(0, VT100_CURSOR_Y(), screen_width, char_height, 0x0000);
-		cursor_y = cy;
+		uint16_t cy = cursorPos.row;
+		cursorPos.row = c;
+		display.fillRect(0, cursorPos.row * charHeight, screenWidth, charHeight, 0x0000);
+		cursorPos.row = cy;
 	}
 }
 
@@ -77,95 +76,93 @@ void Vt100::clearLines(uint16_t start_line, uint16_t end_line)
 void Vt100::move(int16_t right_left, int16_t bottom_top)
 {
 	// calculate how many lines we need to move down or up if x movement goes outside screen
-	int16_t new_x = right_left + cursor_x;
-	if(new_x >= col_count) {
+	int16_t new_x = right_left + cursorPos.col;
+	if(new_x >= colCount) {
 		if(flags.cursor_wrap) {
-			bottom_top += new_x / col_count;
-			cursor_x = new_x % col_count;
+			bottom_top += new_x / colCount;
+			cursorPos.col = new_x % colCount;
 		} else {
-			cursor_x = col_count;
+			cursorPos.col = colCount;
 		}
 	} else if(new_x < 0) {
-		bottom_top += new_x / col_count;
-		cursor_x = col_count - (abs(new_x) % col_count);
+		bottom_top += new_x / colCount;
+		cursorPos.col = colCount - (abs(new_x) % colCount);
 	} else {
-		cursor_x = new_x;
+		cursorPos.col = new_x;
 	}
 
 	if(bottom_top != 0) {
-		int16_t new_y = cursor_y + bottom_top;
+		int16_t new_y = cursorPos.row + bottom_top;
 		// bottom margin 39 marks last line as static on 40 line display
 		// therefore, we would scroll when new cursor has moved to line 39
-		if(new_y > scroll_end_row) {
-			cursor_y = scroll_end_row;
-		} else if(new_y < scroll_start_row) {
-			cursor_y = scroll_start_row;
+		if(new_y > scrollEndRow) {
+			cursorPos.row = scrollEndRow;
+		} else if(new_y < scrollStartRow) {
+			cursorPos.row = scrollStartRow;
 		} else {
-			cursor_y = new_y;
+			cursorPos.row = new_y;
 			return;
 		}
 
 		// scrolls the scroll region up (lines > 0) or down (lines < 0)
-		auto lines = new_y - cursor_y;
-		auto top = VT100_Y(scroll_start_row);
-		auto bottom = VT100_Y(1 + scroll_end_row);
-		display.scroll(top, bottom, VT100_Y(lines));
+		auto lines = new_y - cursorPos.row;
+		display.scroll(scrollStartRow * charHeight, ((1 + scrollEndRow) * charHeight) - 1, lines * charHeight);
 
 		// clearing of lines that we have scrolled up or down
 		if(lines > 0) {
-			clearLines(1 + scroll_end_row - lines, scroll_end_row);
+			clearLines(1 + scrollEndRow - lines, scrollEndRow);
 		} else {
-			clearLines(scroll_start_row, scroll_start_row - lines - 1);
+			clearLines(scrollStartRow, scrollStartRow - lines - 1);
 		}
 	}
 }
 
 void Vt100::drawCursor()
 {
-	//uint16_t x = t->cursor_x * t->char_width;
-	//uint16_t y = t->cursor_y * t->char_height;
+	//uint16_t x = t->cursorPos.col * t->char_width;
+	//uint16_t y = t->cursorPos.row * t->char_height;
 
 	//display.fillRect(x, y, t->char_width, t->char_height, t->front_color);
 }
 
 // sends the character to the display and updates cursor position
-void Vt100::_putc(uint8_t ch)
+void Vt100::putcInternal(uint8_t ch)
 {
 	if(ch < 0x20 || ch > 0x7e) {
-		_putc('0');
-		_putc('x');
-		_putc(hexchar((ch & 0xf0) >> 4));
-		_putc(hexchar(ch & 0x0f));
+		putcInternal('0');
+		putcInternal('x');
+		putcInternal(hexchar((ch & 0xf0) >> 4));
+		putcInternal(hexchar(ch & 0x0f));
 		return;
 	}
 
-	display.setFrontColor(front_color);
-	display.setBackColor(back_color);
-	display.drawChar(VT100_CURSOR_X(), VT100_CURSOR_Y(), ch);
+	display.setFrontColor(frontColor);
+	display.setBackColor(backColor);
+	display.drawChar(cursorPos.col * charWidth, cursorPos.row * charHeight, ch);
 
 	// move cursor right
 	move(1, 0);
 	drawCursor();
 }
 
-void Vt100::_st_command_arg(uint8_t ev, uint16_t arg)
+void Vt100::state_command_arg(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
 	}
 
 	if(isdigit(arg)) { // a digit argument
-		args[narg] = args[narg] * 10 + (arg - '0');
+		args.addDigit(arg);
 		return;
 	}
 
 	if(arg == ';') { // separator
-		++narg;
+		++args.count;
 		return;
 	}
 
 	// no more arguments, go back to command state
-	++narg;
+	++args.count;
 	state = ret_state;
 	ret_state = State::idle;
 
@@ -173,7 +170,7 @@ void Vt100::_st_command_arg(uint8_t ev, uint16_t arg)
 	callState(ev, arg);
 }
 
-void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
+void Vt100::state_esc_sq_bracket(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		// for all other events restore normal mode
@@ -184,7 +181,7 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	if(isdigit(arg)) {
 		// start of an argument
 		ret_state = State::esc_sq_bracket;
-		_st_command_arg(ev, arg);
+		state_command_arg(ev, arg);
 		state = State::command_arg;
 		return;
 	}
@@ -198,10 +195,10 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	switch(arg) {
 	// move cursor up (cursor stops at top margin)
 	case 'A': {
-		int n = (narg > 0) ? args[0] : 1;
-		cursor_y -= n;
-		if(cursor_y < scroll_start_row) {
-			cursor_y = scroll_start_row;
+		int n = (args.count > 0) ? args[0] : 1;
+		cursorPos.row -= n;
+		if(cursorPos.row < scrollStartRow) {
+			cursorPos.row = scrollStartRow;
 		}
 		state = State::idle;
 		break;
@@ -209,10 +206,10 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 
 	// cursor down (cursor stops at bottom margin)
 	case 'B': {
-		int n = (narg > 0) ? args[0] : 1;
-		cursor_y += n;
-		if(cursor_y > scroll_end_row) {
-			cursor_y = scroll_end_row;
+		int n = (args.count > 0) ? args[0] : 1;
+		cursorPos.row += n;
+		if(cursorPos.row > scrollEndRow) {
+			cursorPos.row = scrollEndRow;
 		}
 		state = State::idle;
 		break;
@@ -220,20 +217,20 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 
 	// cursor right (cursor stops at right margin)
 	case 'C': {
-		int n = (narg > 0) ? args[0] : 1;
-		cursor_x += n;
-		if(cursor_x > col_count)
-			cursor_x = col_count;
+		int n = (args.count > 0) ? args[0] : 1;
+		cursorPos.col += n;
+		if(cursorPos.col > colCount)
+			cursorPos.col = colCount;
 		state = State::idle;
 		break;
 	}
 
 	// cursor left
 	case 'D': {
-		int n = (narg > 0) ? args[0] : 1;
-		cursor_x -= n;
-		if(cursor_x < 0) {
-			cursor_x = 0;
+		auto n = (args.count > 0) ? args[0] : 1;
+		cursorPos.col -= n;
+		if(cursorPos.col < 0) {
+			cursorPos.col = 0;
 		}
 		state = State::idle;
 		break;
@@ -243,39 +240,37 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	case 'f':
 	case 'H':
 		// cursor stops at respective margins
-		cursor_x = (narg >= 1) ? (args[1] - 1) : 0;
-		cursor_y = (narg == 2) ? (args[0] - 1) : 0;
+		cursorPos.col = (args.count >= 1) ? (args[1] - 1) : 0;
+		cursorPos.row = (args.count == 2) ? (args[0] - 1) : 0;
 
 		if(flags.origin_mode) {
-			cursor_y += scroll_start_row;
-			if(cursor_y > scroll_end_row) {
-				cursor_y = scroll_end_row;
+			cursorPos.row += scrollStartRow;
+			if(cursorPos.row > scrollEndRow) {
+				cursorPos.row = scrollEndRow;
 			}
 		}
 
-		if(cursor_x >= col_count) {
-			cursor_x = col_count - 1;
+		if(cursorPos.col >= colCount) {
+			cursorPos.col = colCount - 1;
 		}
-		if(cursor_y >= row_count) {
-			cursor_y = row_count - 1;
+		if(cursorPos.row >= rowCount) {
+			cursorPos.row = rowCount - 1;
 		}
 
 		state = State::idle;
-
-		debug_i("CURSOR = %u, %u", cursor_x, cursor_y);
 		break;
 
 	// clear screen from cursor up or down
 	case 'J':
-		if(narg == 0 || (narg == 1 && args[0] == 0)) {
+		if(args.count == 0 || (args.count == 1 && args[0] == 0)) {
 			// clear down to the bottom of screen (including cursor)
-			clearLines(cursor_y, row_count);
-		} else if(narg == 1 && args[0] == 1) {
+			clearLines(cursorPos.row, rowCount);
+		} else if(args.count == 1 && args[0] == 1) {
 			// clear top of screen to current line (including cursor)
-			clearLines(0, cursor_y);
-		} else if(narg == 1 && args[0] == 2) {
+			clearLines(0, cursorPos.row);
+		} else if(args.count == 1 && args[0] == 2) {
 			// clear whole screen
-			clearLines(0, row_count);
+			clearLines(0, rowCount);
 			// reset scroll value
 			resetScroll();
 		}
@@ -284,18 +279,18 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 
 	// clear line from cursor right/left
 	case 'K': {
-		uint16_t x = VT100_CURSOR_X();
-		uint16_t y = VT100_CURSOR_Y();
+		uint16_t x = cursorPos.col * charWidth;
+		uint16_t y = cursorPos.row * charHeight;
 
-		if(narg == 0 || (narg == 1 && args[0] == 0)) {
+		if(args.count == 0 || (args.count == 1 && args[0] == 0)) {
 			// clear to end of line (to \n or to edge?), including cursor
-			display.fillRect(x, y, screen_width - x, char_height, back_color);
-		} else if(narg == 1 && args[0] == 1) {
+			display.fillRect(x, y, screenWidth - x, charHeight, backColor);
+		} else if(args.count == 1 && args[0] == 1) {
 			// clear from left to current cursor position
-			display.fillRect(0, y, x + char_width, char_height, back_color);
-		} else if(narg == 1 && args[0] == 2) {
+			display.fillRect(0, y, x + charWidth, charHeight, backColor);
+		} else if(args.count == 1 && args[0] == 2) {
 			// clear whole current line
-			display.fillRect(0, y, screen_width, char_height, back_color);
+			display.fillRect(0, y, screenWidth, charHeight, backColor);
 		}
 		state = State::idle;
 		break;
@@ -311,10 +306,10 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	// delete characters args[0] or 1 in front of cursor
 	case 'P': {
 		// TODO: this needs to correctly delete n chars
-		int n = ((narg > 0) ? args[0] : 1);
+		int n = ((args.count > 0) ? args[0] : 1);
 		move(-n, 0);
 		for(int c = 0; c < n; c++) {
-			_putc(' ');
+			putcInternal(' ');
 		}
 		state = State::idle;
 		break;
@@ -332,15 +327,13 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 
 	// save cursor pos
 	case 's':
-		saved_cursor_x = cursor_x;
-		saved_cursor_y = cursor_y;
+		savedCursorPos = cursorPos;
 		state = State::idle;
 		break;
 
 	// restore cursor pos
 	case 'u':
-		cursor_x = saved_cursor_x;
-		cursor_y = saved_cursor_y;
+		cursorPos = savedCursorPos;
 		// moveCursor(saved_cursor_x, saved_cursor_y);
 		state = State::idle;
 		break;
@@ -357,14 +350,14 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	// sets colors. Accepts up to 3 args
 	case 'm':
 		// [m means reset the colors to default
-		if(narg == 0) {
-			front_color = 0xffff;
-			back_color = 0x0000;
+		if(args.count == 0) {
+			frontColor = 0xffff;
+			backColor = 0x0000;
 		}
 
-		while(narg) {
-			narg--;
-			int n = args[narg];
+		while(args.count) {
+			args.count--;
+			int n = args[args.count];
 			static const uint16_t colors[] = {
 				0x0000, // black
 				0xf800, // red
@@ -376,18 +369,18 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 				0xffff  // white
 			};
 			if(n == 0) { // all attributes off
-				front_color = 0xffff;
-				back_color = 0x0000;
+				frontColor = 0xffff;
+				backColor = 0x0000;
 
-				display.setFrontColor(front_color);
-				display.setBackColor(back_color);
+				display.setFrontColor(frontColor);
+				display.setBackColor(backColor);
 			}
 			if(n >= 30 && n < 38) { // fg colors
-				front_color = colors[n - 30];
-				display.setFrontColor(front_color);
+				frontColor = colors[n - 30];
+				display.setFrontColor(frontColor);
 			} else if(n >= 40 && n < 48) {
-				back_color = colors[n - 40];
-				display.setBackColor(back_color);
+				backColor = colors[n - 40];
+				display.setBackColor(backColor);
 			}
 		}
 		state = State::idle;
@@ -402,9 +395,9 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	case 'r':
 		// the top value is first row of scroll region
 		// the bottom value is the first row of static region after scroll
-		if(narg == 2 && args[0] < args[1]) {
-			scroll_start_row = args[0] - 1;
-			scroll_end_row = args[1] - 1;
+		if(args.count == 2 && args[0] < args[1]) {
+			scrollStartRow = args[0] - 1;
+			scrollEndRow = args[1] - 1;
 		} else {
 			resetScroll();
 		}
@@ -434,7 +427,7 @@ void Vt100::_st_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::_st_esc_question(uint8_t ev, uint16_t arg)
+void Vt100::state_esc_question(uint8_t ev, uint16_t arg)
 {
 	// DEC mode commands
 	if(ev != EV_CHAR) {
@@ -443,7 +436,7 @@ void Vt100::_st_esc_question(uint8_t ev, uint16_t arg)
 
 	if(isdigit(arg)) { // start of an argument
 		ret_state = State::esc_question;
-		_st_command_arg(ev, arg);
+		state_command_arg(ev, arg);
 		state = State::command_arg;
 		return;
 	}
@@ -491,7 +484,6 @@ void Vt100::_st_esc_question(uint8_t ev, uint16_t arg)
 			// h = cursor relative to scroll region
 			// l = cursor independent of scroll region
 			flags.origin_mode = (arg == 'h') ? 1 : 0;
-			debug_i("ORIGIN MODE: %u", flags.origin_mode);
 			break;
 
 		case 7:
@@ -527,7 +519,7 @@ void Vt100::_st_esc_question(uint8_t ev, uint16_t arg)
 	state = State::idle;
 }
 
-void Vt100::_st_esc_left_br(uint8_t ev, uint16_t arg)
+void Vt100::state_esc_left_br(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -548,7 +540,7 @@ void Vt100::_st_esc_left_br(uint8_t ev, uint16_t arg)
 	//state = State::idle;
 }
 
-void Vt100::_st_esc_right_br(uint8_t ev, uint16_t arg)
+void Vt100::state_esc_right_br(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -569,7 +561,7 @@ void Vt100::_st_esc_right_br(uint8_t ev, uint16_t arg)
 	//state = State::idle;
 }
 
-void Vt100::_st_esc_hash(uint8_t ev, uint16_t arg)
+void Vt100::state_esc_hash(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -587,7 +579,7 @@ void Vt100::_st_esc_hash(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::_st_escape(uint8_t ev, uint16_t arg)
+void Vt100::state_escape(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		// for all other events restore normal mode
@@ -595,35 +587,30 @@ void Vt100::_st_escape(uint8_t ev, uint16_t arg)
 		return;
 	}
 
-	auto clearArgs = [this]() {
-		narg = 0;
-		memset(args, 0, sizeof(args));
-	};
-
 	switch(arg) {
 	// command
 	case '[': {
 		// prepare command state and switch to it
-		clearArgs();
+		args = {};
 		state = State::esc_sq_bracket;
 		break;
 	}
 
 	/* ESC ( */
 	case '(':
-		clearArgs();
+		args = {};
 		state = State::esc_left_br;
 		break;
 
 	/* ESC ) */
 	case ')':
-		clearArgs();
+		args = {};
 		state = State::esc_right_br;
 		break;
 
 	// ESC #
 	case '#':
-		clearArgs();
+		args = {};
 		state = State::esc_hash;
 		break;
 
@@ -647,23 +634,21 @@ void Vt100::_st_escape(uint8_t ev, uint16_t arg)
 	// next line (same as '\r\n')
 	case 'E':
 		move(0, 1);
-		cursor_x = 0;
+		cursorPos.col = 0;
 		state = State::idle;
 		break;
 
 	// Save attributes and cursor position
 	case '7':
 	case 's':
-		saved_cursor_x = cursor_x;
-		saved_cursor_y = cursor_y;
+		savedCursorPos = cursorPos;
 		state = State::idle;
 		break;
 
 	// Restore attributes and cursor position
 	case '8':
 	case 'u':
-		cursor_x = saved_cursor_x;
-		cursor_y = saved_cursor_y;
+		cursorPos = savedCursorPos;
 		state = State::idle;
 		break;
 
@@ -715,7 +700,7 @@ void Vt100::_st_escape(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::_st_idle(uint8_t ev, uint16_t arg)
+void Vt100::state_idle(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -731,24 +716,24 @@ void Vt100::_st_idle(uint8_t ev, uint16_t arg)
 	// new line
 	case '\n':
 		move(0, 1);
-		cursor_x = 0;
-		// moveCursor(0, cursor_y + 1);
+		cursorPos.col = 0;
+		// moveCursor(0, cursorPos.row + 1);
 		// do scrolling here!
 		break;
 
 	// carrage return (0x0d)
 	case '\r':
-		cursor_x = 0;
+		cursorPos.col = 0;
 		// move(0, 1);
-		// moveCursor(0, cursor_y);
+		// moveCursor(0, cursorPos.row);
 		break;
 
 	// backspace 0x08
 	case '\b':
 		move(-1, 0);
 		// backspace does not delete the character! Only moves cursor!
-		//display.drawChar(cursor_x * char_width,
-		//	cursor_y * char_height, ' ');
+		//display.drawChar(cursorPos.col * char_width,
+		//	cursorPos.row * char_height, ' ');
 		break;
 
 	// del - delete character under cursor
@@ -756,18 +741,18 @@ void Vt100::_st_idle(uint8_t ev, uint16_t arg)
 		// Problem: with current implementation, we can't move the rest of line
 		// to the left as is the proper behavior of the delete character
 		// fill the current position with background color
-		_putc(' ');
+		putcInternal(' ');
 		move(-1, 0);
-		// clearChar(cursor_x, cursor_y);
+		// clearChar(cursorPos.col, cursorPos.row);
 		break;
 
 	// tab
 	case '\t': {
 		// tab fills characters on the line until we reach a multiple of tab_stop
 		int tab_stop = 4;
-		int to_put = tab_stop - (cursor_x % tab_stop);
+		int to_put = tab_stop - (cursorPos.col % tab_stop);
 		while(to_put--) {
-			_putc(' ');
+			putcInternal(' ');
 		}
 		break;
 	}
@@ -784,44 +769,12 @@ void Vt100::_st_idle(uint8_t ev, uint16_t arg)
 		break;
 
 	default:
-		_putc(arg);
+		putcInternal(arg);
 	}
 }
 
 void Vt100::putc(uint8_t c, unsigned count)
 {
-	/*char *buffer = 0;
-	switch(c){
-		case KEY_UP:         buffer="\e[A";    break;
-		case KEY_DOWN:       buffer="\e[B";    break;
-		case KEY_RIGHT:      buffer="\e[C";    break;
-		case KEY_LEFT:       buffer="\e[D";    break;
-		case KEY_BACKSPACE:  buffer="\b";      break;
-		case KEY_IC:         buffer="\e[2~";   break;
-		case KEY_DC:         buffer="\e[3~";   break;
-		case KEY_HOME:       buffer="\e[7~";   break;
-		case KEY_END:        buffer="\e[8~";   break;
-		case KEY_PPAGE:      buffer="\e[5~";   break;
-		case KEY_NPAGE:      buffer="\e[6~";   break;
-		case KEY_SUSPEND:    buffer="\x1A";    break;      // ctrl-z
-		case KEY_F(1):       buffer="\e[[A";   break;
-		case KEY_F(2):       buffer="\e[[B";   break;
-		case KEY_F(3):       buffer="\e[[C";   break;
-		case KEY_F(4):       buffer="\e[[D";   break;
-		case KEY_F(5):       buffer="\e[[E";   break;
-		case KEY_F(6):       buffer="\e[17~";  break;
-		case KEY_F(7):       buffer="\e[18~";  break;
-		case KEY_F(8):       buffer="\e[19~";  break;
-		case KEY_F(9):       buffer="\e[20~";  break;
-		case KEY_F(10):      buffer="\e[21~";  break;
-	}
-	if(buffer){
-		while(*buffer){
-			state(EV_CHAR, *buffer++);
-		}
-	} else {
-		state(EV_CHAR, 0x0000 | c);
-	}*/
 	while(count--) {
 		callState(EV_CHAR, 0x0000 | c);
 	}
