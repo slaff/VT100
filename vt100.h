@@ -50,6 +50,7 @@ public:
 };
 
 void vt100_init(DisplayDevice* display, VT100Callbacks* callbacks);
-void vt100_putc(uint8_t ch);
+void vt100_putc(uint8_t ch, unsigned count = 1);
 void vt100_puts(const char* str);
 size_t vt100_nputs(const char* str, size_t length);
+size_t vt100_printf(const char *fmt, ...);
