@@ -23,19 +23,21 @@
 #include <stringutil.h>
 #include <m_printf.h>
 
-#include "vt100.h"
+#include "include/VT100/Terminal.h"
 
 #define KEY_ESC 0x1b
 #define KEY_DEL 0x7f
 #define KEY_BELL 0x07
 
-const Vt100::StateMethod Vt100::stateTable[] = {
-#define XX(s) &Vt100::state_##s,
+namespace VT100
+{
+const Terminal::StateMethod Terminal::stateTable[] = {
+#define XX(s) &Terminal::state_##s,
 	VT100_STATE_MAP(XX)
 #undef XX
 };
 
-void Vt100::reset()
+void Terminal::reset()
 {
 	charHeight = display.getCharHeight();
 	charWidth = display.getCharWidth();
@@ -56,13 +58,13 @@ void Vt100::reset()
 	display.setBackColor(backColor);
 }
 
-void Vt100::resetScroll()
+void Terminal::resetScroll()
 {
 	scrollStartRow = 0;
 	scrollEndRow = rowCount - 1;
 }
 
-void Vt100::clearLines(uint16_t start_line, uint16_t end_line)
+void Terminal::clearLines(uint16_t start_line, uint16_t end_line)
 {
 	for(int c = start_line; c <= end_line; c++) {
 		uint16_t cy = cursorPos.row;
@@ -73,7 +75,7 @@ void Vt100::clearLines(uint16_t start_line, uint16_t end_line)
 }
 
 // moves the cursor relative to current cursor position and scrolls the screen
-void Vt100::move(int16_t right_left, int16_t bottom_top)
+void Terminal::move(int16_t right_left, int16_t bottom_top)
 {
 	// calculate how many lines we need to move down or up if x movement goes outside screen
 	int16_t new_x = right_left + cursorPos.col;
@@ -117,7 +119,7 @@ void Vt100::move(int16_t right_left, int16_t bottom_top)
 	}
 }
 
-void Vt100::drawCursor()
+void Terminal::drawCursor()
 {
 	//uint16_t x = t->cursorPos.col * t->char_width;
 	//uint16_t y = t->cursorPos.row * t->char_height;
@@ -126,7 +128,7 @@ void Vt100::drawCursor()
 }
 
 // sends the character to the display and updates cursor position
-void Vt100::putcInternal(uint8_t ch)
+void Terminal::putcInternal(uint8_t ch)
 {
 	if(ch < 0x20 || ch > 0x7e) {
 		putcInternal('0');
@@ -145,7 +147,7 @@ void Vt100::putcInternal(uint8_t ch)
 	drawCursor();
 }
 
-void Vt100::state_command_arg(uint8_t ev, uint16_t arg)
+void Terminal::state_command_arg(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -170,7 +172,7 @@ void Vt100::state_command_arg(uint8_t ev, uint16_t arg)
 	callState(ev, arg);
 }
 
-void Vt100::state_esc_sq_bracket(uint8_t ev, uint16_t arg)
+void Terminal::state_esc_sq_bracket(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		// for all other events restore normal mode
@@ -427,7 +429,7 @@ void Vt100::state_esc_sq_bracket(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::state_esc_question(uint8_t ev, uint16_t arg)
+void Terminal::state_esc_question(uint8_t ev, uint16_t arg)
 {
 	// DEC mode commands
 	if(ev != EV_CHAR) {
@@ -519,7 +521,7 @@ void Vt100::state_esc_question(uint8_t ev, uint16_t arg)
 	state = State::idle;
 }
 
-void Vt100::state_esc_left_br(uint8_t ev, uint16_t arg)
+void Terminal::state_esc_left_br(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -540,7 +542,7 @@ void Vt100::state_esc_left_br(uint8_t ev, uint16_t arg)
 	//state = State::idle;
 }
 
-void Vt100::state_esc_right_br(uint8_t ev, uint16_t arg)
+void Terminal::state_esc_right_br(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -561,7 +563,7 @@ void Vt100::state_esc_right_br(uint8_t ev, uint16_t arg)
 	//state = State::idle;
 }
 
-void Vt100::state_esc_hash(uint8_t ev, uint16_t arg)
+void Terminal::state_esc_hash(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -579,7 +581,7 @@ void Vt100::state_esc_hash(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::state_escape(uint8_t ev, uint16_t arg)
+void Terminal::state_escape(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		// for all other events restore normal mode
@@ -700,7 +702,7 @@ void Vt100::state_escape(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::state_idle(uint8_t ev, uint16_t arg)
+void Terminal::state_idle(uint8_t ev, uint16_t arg)
 {
 	if(ev != EV_CHAR) {
 		return;
@@ -773,21 +775,21 @@ void Vt100::state_idle(uint8_t ev, uint16_t arg)
 	}
 }
 
-void Vt100::putc(uint8_t c, unsigned count)
+void Terminal::putc(uint8_t c, unsigned count)
 {
 	while(count--) {
 		callState(EV_CHAR, 0x0000 | c);
 	}
 }
 
-void Vt100::puts(const char* str)
+void Terminal::puts(const char* str)
 {
 	while(*str) {
 		putc(*str++);
 	}
 }
 
-size_t Vt100::nputs(const char* str, size_t length)
+size_t Terminal::nputs(const char* str, size_t length)
 {
 	unsigned n = length;
 	while(n--) {
@@ -796,7 +798,7 @@ size_t Vt100::nputs(const char* str, size_t length)
 	return length;
 }
 
-size_t Vt100::printf(const char* fmt, ...)
+size_t Terminal::printf(const char* fmt, ...)
 {
 	va_list args;
 
@@ -809,3 +811,5 @@ size_t Vt100::printf(const char* fmt, ...)
 
 	return n;
 }
+
+} // namespace VT100

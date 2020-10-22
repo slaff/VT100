@@ -1,4 +1,6 @@
 /**
+ * Terminal.h
+ *
 	This file is part of FORTMAX kernel.
 
 	FORTMAX kernel is free software: you can redistribute it and/or modify
@@ -23,32 +25,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <sming_attr.h>
+#include "Display.h"
 
-class DisplayDevice
+namespace VT100
 {
-public:
-	virtual void drawString(uint16_t x, uint16_t y, const char* text) = 0;
-	virtual void drawChar(uint16_t x, uint16_t y, uint8_t c) = 0;
-	virtual void setBackColor(uint16_t col) = 0;
-	virtual void setFrontColor(uint16_t col) = 0;
-	virtual void fillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) = 0;
-
-	virtual void scroll(uint16_t top, uint16_t bottom, int16_t diff) = 0;
-
-	virtual uint16_t getWidth() = 0;
-	virtual uint16_t getHeight() = 0;
-	virtual uint8_t getCharWidth() = 0;
-	virtual uint8_t getCharHeight() = 0;
-};
-
-class VT100Callbacks
-{
-public:
-	virtual void sendResponse(const char* str) = 0;
-};
-
 // events that are passed into states
 enum {
 	EV_CHAR = 1,
@@ -64,10 +44,16 @@ enum {
 	XX(esc_right_br)                                                                                                   \
 	XX(escape)
 
-class Vt100
+class Callbacks
 {
 public:
-	Vt100(DisplayDevice& display, VT100Callbacks& callbacks) : display(display), callbacks(callbacks)
+	virtual void sendResponse(const char* str) = 0;
+};
+
+class Terminal
+{
+public:
+	Terminal(Display& display, Callbacks& callbacks) : display(display), callbacks(callbacks)
 	{
 	}
 
@@ -114,13 +100,13 @@ protected:
 	VT100_STATE_MAP(XX)
 #undef XX
 
-	__forceinline void callState(uint8_t ev, uint16_t arg)
+	void callState(uint8_t ev, uint16_t arg)
 	{
 		(this->*stateTable[unsigned(state)])(ev, arg);
 	}
 
 private:
-	using StateMethod = void (Vt100::*)(uint8_t ev, uint16_t arg);
+	using StateMethod = void (Terminal::*)(uint8_t ev, uint16_t arg);
 	static const StateMethod stateTable[];
 
 	union Flags {
@@ -162,7 +148,7 @@ private:
 		uint16_t values[4];
 		uint8_t count;
 
-		__forceinline void addDigit(char c)
+		void addDigit(char c)
 		{
 			values[count] *= 10;
 			values[count] += c - '0';
@@ -178,6 +164,8 @@ private:
 	State state;
 	State ret_state;
 
-	DisplayDevice& display;
-	VT100Callbacks& callbacks;
+	Display& display;
+	Callbacks& callbacks;
 };
+
+} // namespace VT100
