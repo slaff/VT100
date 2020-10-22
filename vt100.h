@@ -17,23 +17,50 @@
 	Copyright: Martin K. Schröder (info@fortmax.se) 2014
 */
 
-#pragma once
+#ifndef __VT100_H
+#define __VT100_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "c_types.h"
 
-#define VT100_SCREEN_WIDTH ili9340_width()
-#define VT100_SCREEN_HEIGHT ili9340_height()
-#define VT100_CHAR_WIDTH 6
-#define VT100_CHAR_HEIGHT 8
-#define VT100_HEIGHT (VT100_SCREEN_HEIGHT / VT100_CHAR_HEIGHT)
-#define VT100_WIDTH (VT100_SCREEN_WIDTH / VT100_CHAR_WIDTH)
+//#define VT100_SCREEN_WIDTH term->display->getWidth()
+//#define VT100_SCREEN_HEIGHT term->display->getHeight()
+//#define VT100_CHAR_WIDTH 9
+//#define VT100_CHAR_HEIGHT 13
+//#define VT100_HEIGHT (VT100_SCREEN_HEIGHT / VT100_CHAR_HEIGHT)
+//#define VT100_WIDTH (VT100_SCREEN_WIDTH / VT100_CHAR_WIDTH)
 
-void vt100_init(void (*send_response)(char *str)); 
+class DisplayDevice
+{
+public:
+	//	virtual void init(void);
+	//	virtual void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
+	//	virtual void drawFastHLine(int16_t x, int16_t y, int16_t h, uint16_t color);
+	//	virtual void setRotation(uint8_t m);
+
+	virtual void drawString(uint16_t x, uint16_t y, const char* text) = 0;
+	virtual void drawChar(uint16_t x, uint16_t y, uint8_t c) = 0;
+	virtual void setBackColor(uint16_t col) = 0;
+	virtual void setFrontColor(uint16_t col) = 0;
+	virtual void fillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) = 0;
+
+	virtual void setScrollStart(uint16_t start) = 0;
+	virtual void setScrollMargins(uint16_t top, uint16_t bottom) = 0;
+
+	virtual uint16_t getWidth() = 0;
+	virtual uint16_t getHeight() = 0;
+	virtual uint8_t getCharWidth() = 0;
+	virtual uint8_t getCharHeight() = 0;
+};
+
+class VT100Callbacks
+{
+public:
+	virtual void sendResponse(const char* str) = 0;
+};
+
+void vt100_init(DisplayDevice* display, VT100Callbacks* callbacks);
 void vt100_putc(uint8_t ch);
-void vt100_puts(const char *str);
+void vt100_puts(const char* str);
+size_t vt100_nputs(const char* str, size_t length);
 
-#ifdef __cplusplus
-}
-#endif
+#endif // __VT100_H
