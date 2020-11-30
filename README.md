@@ -1,3 +1,6 @@
+VT100 Emulator
+==============
+
 This is a vt100 emulator written for devices with under 4kb of ram (for example the ATMega microcontroller). The emulator also uses ili9340 display by default, but can be compiled to use another display with only a few changes to the source code.
 
 Note that because of the small size of the available memory and the slow speed of the microcontroller, it is a little tricky to implement all the escape sequences that are supported in vt100.
