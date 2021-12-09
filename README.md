@@ -38,7 +38,7 @@ The driver currently supports the following escape sequences:
 	- (no) - the driver currently does not support the sequence
 	- (?) - do we really need this function? Or: what does this do exactly?
 
-	VT52 Compatable Mode
+	VT52 Compatible Mode
 	--------------------
 
 	- (yes) ESC A           Cursor up with scroll
@@ -59,7 +59,7 @@ The driver currently supports the following escape sequences:
 	- (?) ESC 2             Graphics processor off (See note 3)
 	- (?) ESC <             Enter ANSI mode
 
-	ANSI Compatable Mode
+	ANSI Compatible Mode
 	--------------------
 
 	- (yes) ESC [ Pn A    Cursor up Pn lines (without scroll)
