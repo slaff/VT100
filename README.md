@@ -317,7 +317,7 @@ The driver currently supports the following escape sequences:
 	- (no) [ ? 14 h	Immediate operation of ENTER key
 	- (no) [ ? 14 l	Deferred operation of ENTER key
 	- (no) [ ? 16 h	Edit selection immediate
-	- (no) [ ? 16 l	Edit selection deffered
+	- (no) [ ? 16 l	Edit selection deferred
 	- (no) [ P		Delete character from cursor position
 	- (no) [ * P		Delete * chars from curosr right
 	- (no) [ M		Delete 1 char from cursor position
